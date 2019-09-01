@@ -19,19 +19,12 @@ class ExcelIO:
         return sheet[i]
 
     def __get_schedule_cell(self, date, num):
-        date = utility.parse_date(date)
-        try:
-            num = int(num)
-        except ValueError:
-            raise exceptions.IncorrectNumFormat()
-        if num < 1 or num > 7:
-            raise exceptions.NumOutOfRange(1, 7)
         i = 2
         while self.schedule.cell(row=i, column=1).value:
             if self.schedule.cell(row=i, column=1).value.date() == date:
                 return self.schedule.cell(row=i, column=num+1)
             i = i + 1
-        raise exceptions.BaseException("Не удалось найти указанную дату в расписании.")
+        raise exceptions.NikolayException("Не удалось найти указанную дату в расписании.")
 
     def get_schedule(self, date, delta=1):
         response = ""
@@ -51,7 +44,7 @@ class ExcelIO:
                     response = response + daily + '\n'
                 return response
             i = i + 1
-        raise exceptions.BaseException("Не удалось найти указанную дату в расписании.")
+        raise exceptions.NikolayException("Не удалось найти указанную дату в расписании.")
 
     def schedule_read(self, date, num):
         return self.__get_schedule_cell(date, num).value
@@ -76,7 +69,7 @@ class ExcelIO:
                 messages.append((message, attachment))
             i = i + 1
         if not count:
-            raise exceptions.BaseException('Информация отсутствует')
+            raise exceptions.NikolayException('Информация отсутствует')
         return messages
 
     def info_read(self, id):
@@ -93,7 +86,10 @@ class ExcelIO:
         row[3].value = attachment
 
     def info_delete(self, id):
-        self.info.delete_rows(id)
+        if self.info[id][0].value:
+            self.info.delete_rows(id)
+        else:
+            raise exceptions.NikolayException('Не удалось найти сообщение с id=%d' % id)
 
     def get_subjects(self):
         response = []

@@ -3,13 +3,11 @@ import handlers
 import exceptions
 from datetime import datetime, time, date, timedelta, timezone
 from vk_api.utils import get_random_id
-from openpyxl import load_workbook
-import re
 import json
 
 public_commands = {
     '!помощь' : handlers.PrintHelp(),
-    '!расписание' : handlers.Schedule(),
+    '!расписание' : handlers.ScheduleShow(),
     '!сейчас' : handlers.Now(),
     '!предметы' : handlers.Subjects(),
     '!инфо' : handlers.Info(),
@@ -43,13 +41,15 @@ weekdays = ["Понедельник",
             "Воскресенье"
 ]
 
-timetable = [ (time(8,30), time(10,0)),
+timetable = [ (time(0,0), time(0,0)),
+              (time(8,30), time(10,0)),
               (time(10,10), time(11,40)),
               (time(12,20), time(13,50)),
               (time(14,0), time(15,30)),
               (time(15,55), time(17,25)),
               (time(17,35), time(19,5)),
               (time(19,15), time(20,45)),
+              (time(23,59), time(23,59)),
 ]
 
 def send_msg(vk_api, event, response, attachment=""):

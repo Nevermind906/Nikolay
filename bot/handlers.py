@@ -2,36 +2,42 @@
 import utility
 import exceptions
 import excel
-import re
 from datetime import datetime, time, date, timezone, timedelta
 
 class Handler():
     def __init__(self):
         self.args = []
+        self.min_args = 0
+        self.max_args = 0
 
     def exec(self, message, attachment):
         self.parse_args(message)
         return [(message, attachment)]
 
-    def check_args(self, min, max):
-        if len(self.args) < min:
-            raise exceptions.NotEnoughArgs(min, len(self.args))
-        if len(self.args) > max:
-            raise exceptions.TooManyArgs(max, len(self.args))
+    def check_args(self):
+        if len(self.args) < self.min_args:
+            raise exceptions.NotEnoughArgs(self.min_args, len(self.args))
+        if len(self.args) > self.max_args:
+            raise exceptions.TooManyArgs(self.max_args, len(self.args))
 
     def parse_args(self, message):
-        if message: self.args = [s.strip() for s in message.split(",")]
+        if message:
+            self.args = [s.strip() for s in message.split(",")]
+        else:
+            self.args = []
 
 class PrintHelp(Handler):
     """\
     !помощь [!команда] - вывод информации по доступным командам
     """
     def __init__(self, admin=False):
-        super().__init__()
         self.admin = admin
+        self.min_args = 0
+        self.max_args = 1
 
     def parse_args(self, message):
         super().parse_args(message)
+        self.check_args()
         if self.admin:
             self.commands = {**utility.public_commands, **utility.admin_commands}
         else:
@@ -39,45 +45,58 @@ class PrintHelp(Handler):
 
     def exec(self, message, attachment):
         self.parse_args(message)
-        self.check_args(0, 1)
         response = ""
         if len(self.args) == 1:
             try:
                 result = self.commands[self.args[0]]
                 response = response + result.__doc__ + '\n'
             except KeyError:
-                raise BaseException("Я не смог найти команду %s. Воспользуйтесь\
-                 !помощь для получения списка команд" % self.args[0])
+                raise exceptions.NikolayException("Я не смог найти команду %s. \n\
+                Воспользуйтесь !помощь для получения списка команд" % self.args[0])
         else:
             response = "Список команд:\n"
             for k in self.commands.keys():
                 response = response + k + '\n'
         return [(response, "")]
 
-class Schedule(Handler):
+class ScheduleShow(Handler):
     """\
-    !расписание [начальный день], [количество дней] - вывод актуального расписания.
-    параметры отделяются ;
-    [начальный день] - день, с которого начинается отсчет, в формате [сегодня|завтра|дд.мм.гг]
+    !расписание начальный день, [количество дней] - вывод актуального расписания.
+    начальный день - день, с которого начинается отсчет, в формате [сегодня|завтра|дд.мм.гг]
     [количество дней] - положительное число от 1 до 14 (по умолчанию 1)
     """
+    def __init__(self):
+        self.min_args = 1
+        self.max_args = 2
+
+    def parse_args(self, message):
+        super().parse_args(message)
+        self.check_args()
+        self.date = utility.parse_date(self.args[0])
+        try:
+            self.delta = int(self.args[1])
+        except ValueError:
+            raise exceptions.NumFormatError("Не могу распознать второй параметр. ")
+        except IndexError:
+            self.delta = 1
+        if self.delta < 1 or self.delta > 14:
+            raise exceptions.NumOutOfRange(1, 14)
+
     def exec(self, message, attachment):
         self.parse_args(message)
-        self.check_args(1, 2)
         eio = excel.ExcelIO()
-        date = utility.parse_date(self.args[0])
-        if len(self.args) == 1:
-            delta = 1
-        else:
-            try:
-                delta = int(self.args[1])
-                if delta < 1 or delta > 14:
-                    raise exceptions.NumOutOfRange(1, 14, "Ошибка во втором параметре. ")
-            except ValueError:
-                raise exceptions.NumFormatError("Ошибка во втором параметре. ")
-        return [(eio.get_schedule(date, delta), "")]
+        return [(eio.get_schedule(self.date, self.delta), "")]
 
-class ScheduleChange(Handler):
+class ScheduleBase(Handler):
+    def parse_args(self, message):
+        super().parse_args(message)
+        self.check_args()
+        self.date = utility.parse_date(self.args[0])
+        try:
+            self.num = int(self.args[1])
+        except ValueError:
+            raise exceptions.NumFormatError("Не могу распознать второй параметр. ")
+
     def _clear_cell(self, eio, date, num):
         cell_value = eio.schedule_read(date, num)
         if not cell_value:
@@ -92,20 +111,27 @@ class ScheduleChange(Handler):
             raise exceptions.CellError(date, num, "пара уже занята")
         eio.schedule_write(date, num, message)
 
-class ScheduleAdd(ScheduleChange):
+
+class ScheduleAdd(ScheduleBase):
     """\
-    !расписание_добавить [дата], [номер пары], [предмет], [аудитория], [описание] \
+    !расписание_добавить дата, номер пары, предмет, аудитория, [описание] \
     - добавить пару в расписание.
-    [дата] - дата проведения в формате [сегодня|завтра|дд.мм.гг]
-    [номер пары] - число от 1 до 7
-    [предмет] - название предмета
-    [аудитория] - строка с номером аудитории
+    дата - дата проведения в формате [сегодня|завтра|дд.мм.гг]
+    номер пары - число от 1 до 7
+    предмет - название предмета
+    аудитория - строка с номером аудитории
     [описание] - произвольная строка (необязательный параметр)
     """
+    def __init__(self):
+        self.min_args = 4
+        self.max_args = 100
+
     def parse_args(self, message):
         super().parse_args(message)
-        if len(self.args) < 4:
-            raise exceptions.NotEnoughArgs(4, len(self.args))
+        if self.num > 7 or self.num < 1:
+            raise excepttions.NumOutOfRange(1, 7)
+        self.subject = self.args[2]
+        self.classroom = self.args[3]
         if len(self.args) >= 5:
             self.description = ", " + ", ".join(self.args[4:])
         else:
@@ -114,79 +140,108 @@ class ScheduleAdd(ScheduleChange):
     def exec(self, message, attachment):
         eio = excel.ExcelIO()
         self.parse_args(message)
-        self._write_cell(eio, self.args[0], self.args[1], self.args[2] + self.description + ", " + self.args[3])
+        self._write_cell(eio, self.date, self.num, self.subject \
+                        + self.description + ", " + self.classroom)
         eio.save()
         return [("Пара успешно добавлена", "")]
 
-class ScheduleDelete(ScheduleChange):
+class ScheduleDelete(ScheduleBase):
     """\
-    !расписание_удалить [дата], [номер пары] - удалить пару из расписания.
-    [дата] - дата проведения в формате [сегодня|завтра|дд.мм.гг]
-    [номер пары] - число от 1 до 7
+    !расписание_удалить дата, номер пары - удалить пару из расписания.
+    дата - дата проведения в формате [сегодня|завтра|дд.мм.гг]
+    номер пары - число от 1 до 7
     """
+    def __init__(self):
+        self.min_args = 2
+        self.max_args = 2
+
+    def parse_args(self, message):
+        super().parse_args(message)
+        if self.num > 7 or self.num < 1:
+            raise excepttions.NumOutOfRange(1, 7)
+
     def exec(self, message, attachment):
-        eio = excel.ExcelIO()
         self.parse_args(message)
-        self.check_args(2, 2)
-        self._clear_cell(eio, self.args[0], self.args[1])
+        eio = excel.ExcelIO()
+        self._clear_cell(eio, self.date, self.num)
         eio.save()
         return [("Пара успешно удалена", "")]
 
-class ScheduleMove(ScheduleChange):
+class ScheduleMove(ScheduleBase):
     """
-    !расписание_перенести [дата], [номер пары], [новая дата], [новый номер пары] - перенос пары \
+    !расписание_перенести дата, номер пары, новая дата, новый номер пары - перенос пары \
     на указанную дату.
-    [дата] - дата проведения в формате [сегодня|завтра|дд.мм.гг]
-    [номер пары] - число от 1 до 7
-    [новая дата] и [новый номер пары] - аналогично
+    дата - дата проведения в формате [сегодня|завтра|дд.мм.гг]
+    номер пары - число от 1 до 7
+    новая дата и новый номер пары - аналогично
     """
+    def __init__(self):
+        self.min_args = 4
+        self.max_args = 4
+
+    def parse_args(self, message):
+        super().parse_args(message)
+        self.new_date = utility.parse_date(self.args[2])
+        try:
+            self.new_num = int(self.args[3])
+        except ValueError:
+            raise exceptions.NumFormatError("Не могу распознать второй параметр. ")
+        if not 0 < self.num < 8 or not 0 < self.new_num < 8:
+            raise excepttions.NumOutOfRange(1, 7)
+
     def exec(self, message, attachment):
         eio = excel.ExcelIO()
         self.parse_args(message)
-        self.check_args(4, 4)
-        old_cell = self._clear_cell(eio, self.args[0], self.args[1])
-        self._write_cell(eio, self.args[2], self.args[3], old_cell)
+        old_cell = self._clear_cell(eio, self.date, self.num)
+        self._write_cell(eio, self.new_date, self.new_num, old_cell)
         eio.save()
         return [("Пара успешно перенесена", "")]
 
 
-class ScheduleUpdate(ScheduleChange):
+class ScheduleUpdate(ScheduleBase):
     """\
-    !расписание_аудитория [дата], [номер пары], [новый номер аудитории] - изменить номер аудитории.
-    [дата] - дата проведения в формате [сегодня|завтра|дд.мм.гг]
-    [номер пары] - число от 1 до 7
-    [новая аудитория] - строка с номером аудитории
+    !расписание_аудитория дата, номер пары, новый номер аудитории - изменить номер аудитории.
+    дата - дата проведения в формате [сегодня|завтра|дд.мм.гг]
+    номер пары - число от 1 до 7
+    новая аудитория - строка с номером аудитории
     """
+    def __init__(self):
+        self.min_args = 3
+        self.max_args = 3
+
+    def parse_args(self, message):
+        super().parse_args(message)
+        if self.num > 7 or self.num < 1:
+            raise excepttions.NumOutOfRange(1, 7)
+        self.classroom = self.args[2]
+
     def exec(self, message, attachment):
-        eio = excel.ExcelIO()
         self.parse_args(message)
-        self.check_args(3, 3)
-        cell_value = self._clear_cell(eio, self.args[0], self.args[1])
+        eio = excel.ExcelIO()
+        cell_value = self._clear_cell(eio, self.date, self.num)
         lst = cell_value.split(", ")
         if len(lst) < 2:
-            raise exceptions.BaseException("Что-то не так с ячейкой в файле расписания")
-        lst[-1] = self.args[2]
+            raise exceptions.NikolayException("Что-то не так с ячейкой в файле расписания")
+        lst[-1] = self.classroom
         cell_value = ", ".join(lst)
-        self._write_cell(eio, self.args[0], self.args[1], cell_value)
+        self._write_cell(eio, self.date, self.num, cell_value)
         eio.save()
         return [("Пара успешно обновлена", "")]
 
 class Subjects(Handler):
     """\
-    !предметы - вывод списка предметов и ведущих преподавателей.
+    !предметы - вывод списка предметов и ведущих преподавателей
     """
     def exec(self, message, attachment):
-        self.parse_args(message)
         eio = excel.ExcelIO()
         subj_lst = eio.get_subjects()
         return [('Список предметов:\n' + '\n'.join(subj_lst), "")]
 
 class Now(Handler):
     """\
-    !сейчас - какая пара идет в данный момент.
+    !сейчас - следующая пара
     """
     def exec(self, message, attachment):
-        self.parse_args(message)
         eio = excel.ExcelIO()
         dt = datetime.now(timezone(timedelta(hours=3)))
         t = dt.time()
@@ -198,14 +253,12 @@ class Now(Handler):
         else:
             start = int(daily_lst[1][0])
             end = int(daily_lst[-3][0])
-            if  t < utility.timetable[start-1][0] or t > utility.timetable[end-1][1]:
+            if  t > utility.timetable[end][1]:
                 response = "Пары закончились, отдыхаем"
             else:
                 for i in range(start-1, end):
-                    if t > utility.timetable[i][0] and t < utility.timetable[i][1]:
+                    if t > utility.timetable[i][1] and t < utility.timetable[i+1][1]:
                         response = daily_lst[i-start+2]
-                if response == "":
-                    response = "Перерыв"
         return [(response, "")]
 
 class Info(Handler):
@@ -213,14 +266,14 @@ class Info(Handler):
     команда может использоваться в 3-х вариантах:
     !инфо - получение всей актуальной информации
     !инфо [запрос] - получение актуальной информации по запросу
-    !инфо -архив [запрос] - получение информации за все время
+    !инфо -архив запрос - получение информации за все время
     """
     def parse_args(self, message):
         if message.startswith("-архив"):
             self.archive = True
             self.q = message.replace("-архив", "").strip()
             if not self.q:
-                raise exceptions.BaseException('Пожалуйста, введите запрос')
+                raise exceptions.NikolayException('Пожалуйста, введите запрос')
             self.date = datetime.fromtimestamp(0).date()
         else:
             self.archive = False
@@ -235,12 +288,12 @@ class Info(Handler):
 
 class InfoAdd(Handler):
     """
-    !инфо_добавить [дата]
+    !инфо_добавить дата
     [текст сообщения с новой строки]
     Внимание! Прикрепляя к сообщению документы убедитесь,
     что они были загружены как публичные (Учебный документ, Книга или Другой документ)
-    [дата] - дедлайн для данного сообщения в формате [сегодня|завтра|дд.мм.гг]
-    или [-],  если не хотите указывать конкретную дату (в качестве даты будет принят конец семестра)
+    дата - дедлайн для данного сообщения в формате [сегодня|завтра|дд.мм.гг]
+    или [-],  если не хотите указывать конкретную дату (+ 90 дней от текущего)
     """
     def parse_args(self, message):
         self.message = ""
@@ -251,7 +304,7 @@ class InfoAdd(Handler):
         else:
             raise exceptions.NotEnoughArgs(2, 0)
         if not self.message:
-            raise exceptions.BaseException("Пожалуйста, введите текст сообщения")
+            raise exceptions.NikolayException("Пожалуйста, введите текст сообщения")
 
     def exec(self, message, attachment):
         self.parse_args(message)
@@ -263,18 +316,26 @@ class InfoAdd(Handler):
 
 class InfoDelete(Handler):
     """
-    !инфо_удалить [id] - удалить сообщение
-    [id]
+    !инфо_удалить id - удалить сообщение.
+    id - номер строки с сообщением в таблице  (> 2)
+    (отображается при выводе !инфо)
     """
+    def __init__(self):
+        self.min_args = 1
+        self.max_args = 1
+
     def parse_args(self, message):
         super().parse_args(message)
+        self.check_args()
         try:
             self.id = int(self.args[0])
+            if self.id < 2:
+                raise exceptions.NikolayException("Введите id > 2")
         except ValueError:
-            raise BaseException("Не могу распознать id")
+            raise exceptions.NumFormatError("Не могу распознать id. ")
+
     def exec(self, message, attachment):
         self.parse_args(message)
-        self.check_args(1, 1)
         eio = excel.ExcelIO()
         eio.info_delete(self.id)
         eio.save()
@@ -283,9 +344,12 @@ class InfoDelete(Handler):
 
 class InfoUpdate(Handler):
     """
-    !инфо_обновить [id] - обновить текст и прикрепления сообщение
+    !инфо_обновить id - обновить текст и прикрепления сообщения.
     [текст сообщения с новой строки]
-    [id] - уникальный идентификатор сообщения. Отображается при выводе !инфо
+    id - номер строки с сообщением в таблице  (> 2)
+    (отображается при выводе !инфо)
+    Текст оригинального сообщения не изменится, если вы оставите его пустым.
+    Аналогично для прикреплений
     """
     def parse_args(self, message, attachment):
         self.message = ""
@@ -293,11 +357,13 @@ class InfoUpdate(Handler):
             try:
                 m = message.split("\n")
                 self.id = int(m[0].strip())
+                if self.id < 2:
+                    raise exceptions.NikolayException("Введите id > 2")
                 self.message = "\n".join(m[1:])
                 if not self.message and not attachment:
-                    raise exceptions.BaseException("Пожалуйста, заполните сообщение")
+                    raise exceptions.NikolayException("Пожалуйста, заполните сообщение")
             except ValueError:
-                raise BaseException("Не могу распознать id")
+                raise exceptions.NumFormatError("Не могу распознать id. ")
         else:
             raise exceptions.NotEnoughArgs(2, 0)
 
@@ -306,6 +372,8 @@ class InfoUpdate(Handler):
         eio = excel.ExcelIO()
         dt = datetime.now(timezone(timedelta(hours=3)))
         info = eio.info_read(self.id)
+        if not info[1]:
+            raise exceptions.NikolayException('Не удалось найти сообщение с id=%d' % self.id)
         if self.message:
             info[3] = self.message
         if attachment:
@@ -316,23 +384,32 @@ class InfoUpdate(Handler):
 
 class InfoMove(Handler):
     """
-    !инфо_перенести [id], [новая дата] - изменить дедлайн сообщения
-    [id] - уникальный идентификатор сообщения. Отображается при выводе !инфо
-    [новая дата] - дата в формате [сегодня|завтра|дд.мм.гг]
+    !инфо_перенести id, новая дата - изменить дедлайн сообщения
+    id - номер строки с сообщением в таблице (> 2)
+    (отображается при выводе !инфо)
+    новая дата - дата в формате [сегодня|завтра|дд.мм.гг]
     """
+    def __init__(self):
+        self.min_args = 2
+        self.max_args = 2
+
     def parse_args(self, message):
         super().parse_args(message)
-        self.check_args(2, 2)
+        self.check_args()
         try:
             self.id = int(self.args[0])
         except ValueError:
-            raise BaseException("Не могу распознать id")
+            raise exceptions.NumFormatError("Не могу распознать id. ")
+        if self.id < 2:
+            raise exceptions.NikolayException("Введите id > 2")
         self.date = utility.parse_date(self.args[1])
 
     def exec(self, message, attachment):
         self.parse_args(message)
         eio = excel.ExcelIO()
         info = eio.info_read(self.id)
+        if not info[1]:
+            raise exceptions.NikolayException('Не удалось найти сообщение с id=%d' % self.id)
         eio.info_write(info[1], self.date, info[3], info[4], info[0])
         eio.save()
         return [("Сообщение успешно перенесено", "")]
