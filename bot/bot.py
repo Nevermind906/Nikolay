@@ -5,8 +5,11 @@ class Bot():
 
     def __init__(self, banned_genres=[]):
         self.banned_genres = banned_genres
-        with open('data/ff.txt', encoding='utf-8') as f:
-            text = f.read()
+        with open('data/data.json', encoding='utf-8') as f:
+            data = json.load(f)
+            text = ""
+            for ff in data:
+                text = text + ff["text"]
         self.model = markovify.Text(text)
         self.commands = {
             '!помощь' : self.print_help,
@@ -30,13 +33,13 @@ class Bot():
         """
         return self.generate_message()
 
-    def generate_message(self, length=350):
+    def generate_message(self):
         """\
         генерирует короткое сообщение
         """
         response = ""
         while not response:
-            response = self.model.make_short_sentence(length)
+            response = self.model.make_short_sentence(200)
         return response
 
     def print_help(self, command):

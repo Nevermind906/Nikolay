@@ -25,10 +25,12 @@ def run():
             if event.type == VkBotEventType.MESSAGE_NEW:
            #Слушаем longpoll, если пришло сообщение то:
                 text = re.match(r"(\W\w*)(.*)", event.raw["object"]["text"], flags = re.DOTALL)
-                command = text.group(1).strip()
-                message = text.group(2).strip()
-                response = bot.responde(command, message)
-                utility.send_msg(vk_api, event, response)
+                if text:
+                    command = text.group(1).strip()
+                    message = text.group(2).strip()
+                    response = bot.responde(command, message)
+                    utility.send_msg(vk_api, event, response)
+
 
     except (RequestException, ApiError) as e:
         try:
