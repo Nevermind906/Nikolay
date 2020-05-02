@@ -2,15 +2,14 @@
 import sys
 sys.path.insert(1, './bot/')
 sys.path.insert(1, './data/')
+sys.path.insert(1, './log/')
 from bot import Bot
 import utility
 from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from requests.exceptions import RequestException
-import re
 import traceback
-from datetime import datetime, time, date
-from time import sleep
+from datetime import datetime, time, date, timezone, timedelta
 from vk_api.exceptions import ApiError
 
 
@@ -24,11 +23,8 @@ def run():
         for event in longpoll.listen():
             if event.type == VkBotEventType.MESSAGE_NEW:
            #Слушаем longpoll, если пришло сообщение то:
-                text = re.match(r"(\W\w*)(.*)", event.raw["object"]["text"], flags = re.DOTALL)
-                if text:
-                    command = text.group(1).strip()
-                    message = text.group(2).strip()
-                    response = bot.responde(command, message)
+                response = bot.responde(event)
+                if response:
                     utility.send_msg(vk_api, event, response)
 
 
