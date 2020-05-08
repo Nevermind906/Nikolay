@@ -5,6 +5,7 @@ sys.path.insert(1, './data/')
 sys.path.insert(1, './log/')
 from bot import Bot
 import utility
+from vk_api import VkUpload
 from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from requests.exceptions import RequestException
@@ -17,15 +18,12 @@ def run():
     try:
         config = utility.load_config()
         vk_session = VkApi(token=config["token"])
-        vk_api = vk_session.get_api()
         longpoll = VkBotLongPoll(vk_session, config["group_id"])
-        bot = Bot()
+        bot = Bot(vk_session)
         for event in longpoll.listen():
             if event.type == VkBotEventType.MESSAGE_NEW:
            #Слушаем longpoll, если пришло сообщение то:
-                response = bot.responde(event)
-                if response:
-                    utility.send_msg(vk_api, event, response)
+                bot.responde(event)
 
 
     except (RequestException, ApiError) as e:

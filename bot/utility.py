@@ -4,7 +4,7 @@ from vk_api.utils import get_random_id
 import json
 
 
-def send_msg(vk_api, event, response, attachment=""):
+def send_msg(vk_api, event, response="", attachment=""):
     if event.from_user:
         vk_api.messages.send(
             user_id=event.raw["object"]["from_id"],

@@ -3,8 +3,11 @@ import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import CountVectorizer # to perform bow
 from sklearn.metrics.pairwise import cosine_similarity
+from gtts import gTTS
 import nltk
+import time
 import string
+from vk_api.upload import VkUpload
 import numpy as np
 from pymystem3 import Mystem
 from nltk.corpus import stopwords # for stop words
@@ -12,9 +15,13 @@ from string import punctuation
 import pandas as pd
 from sklearn.metrics import pairwise_distances
 import re
+import os
+import utility
 class Bot():
 
-    def __init__(self):
+    def __init__(self, vk_session):
+        self.vk = vk_session.get_api()
+        self.upload = VkUpload(vk_session)
         with open('data/data.json', encoding='utf-8') as f:
             data = json.load(f)
             text = ""
@@ -23,27 +30,47 @@ class Bot():
         self.model = markovify.Text(text)
         self.commands = {
             '!помощь' : self.print_help,
-            '!го' : self.generate,
+            '!го' : self.generate_voice,
+            '!текст' : self.generate_sentence,
             '!ролка' : self.enable_play_mode
         }
         self.play_mode = False
+
+    def uploadMP3onSERVER(self, text, event):
+        tts = gTTS(text=text, lang="ru")
+        name = str(int(time.time())) + ".mp3" # имя файла
+        tts.save(name) # сохраняем файл
+        #print(event.raw["object"]["from_id"])
+        document = self.upload.audio_message(name, peer_id=event.raw["object"]["from_id"])
+        #print(document)
+        type = document["type"]
+        att = type + str(document[type]["owner_id"]) + "_" + str(document[type]["id"]) + "_" + document[type]["access_key"]
+        #print(att)
+        #utility.send_msg(self.vk, event, "", att)
+        os.remove(name)
+        return att
 
     def responde(self, event):
         """\
         передает сообщение нужному обработчику
         """
+        self.event = event
         if self.play_mode:
-            return self.generate_similar_sentence(event.raw["object"]["text"])
+            msg = self.generate_similar_sentence(self.event.raw["object"]["text"])
+            if msg:
+                utility.send_msg(self.vk, self.event, msg)
         else:
             text = re.match(r"(\W\w*)(.*)", event.raw["object"]["text"], flags = re.DOTALL)
             if text:
                 command = text.group(1).strip()
                 message = text.group(2).strip()
                 if command in self.commands:
-                    return self.commands[command](message)
+                    msg, att = self.commands[command](message)
+                    utility.send_msg(self.vk, self.event, msg, att)
                 else:
-                    return ("Я не смог найти команду %s. \n\
+                    msg = ("Я не смог найти команду %s. \n\
                             Воспользуйтесь !помощь для получения списка команд" % command)
+                    utility.send_msg(self.vk, self.event, msg)
 
     def enable_play_mode(self, message):
         """\
@@ -52,22 +79,24 @@ class Bot():
         занять некоторое время.
         """
         self.play_mode = True
-        return "Ну чтож, давай поиграем, лапуля. Стоп-слово ты знаешь ;)"
+        return ("Ну чтож, давай поиграем, лапуля. Стоп-слово ты знаешь ;)", "")
 
-    def generate(self, message):
+    def generate_voice(self, message):
         """\
-        !го - генерирует сообщение в соответствии с выбранными жанрами
+        !го - генерирует голосовое сообщение
         """
-        return self.generate_sentence()
+        text, _ = self.generate_sentence(message)
+        att = self.uploadMP3onSERVER(text, self.event)
+        return ("", att)
 
-    def generate_sentence(self):
+    def generate_sentence(self, message):
         """\
-        генерирует короткое сообщение
+        !текст - генерирует текстовое сообщение
         """
         response = ""
         while not response:
-            response = self.model.make_short_sentence(300)
-        return response
+            response = self.model.make_sentence()
+        return (response, "")
 
     def generate_similar_sentence(self, message):
         """\
@@ -121,12 +150,12 @@ class Bot():
         """
         if command:
             if command in self.commands:
-                return self.commands[command].__doc__ + '\n'
+                return (self.commands[command].__doc__ + '\n', "")
             else:
-                return ("Я не смог найти команду %s. \n\
-                        Воспользуйтесь !помощь для получения списка команд" % command)
+                return (("Я не смог найти команду %s. \n\
+                        Воспользуйтесь !помощь для получения списка команд" % command), "")
         else:
             response = "Список команд:\n"
             for k in self.commands.keys():
                 response = response + k + '\n'
-            return response
+            return (response, "")
